@@ -1,7 +1,6 @@
 
 
-
-EXAMPLE USAGE
+EXAMPLE USAGE: RUBY ON RAILS BACK-END *************************************************************************************
 
 class AccountController < ApplicationController
 
@@ -178,4 +177,91 @@ end
 
 
 
+
+
+
+
+
+
+
+
+EXAMPLE USAGE: RUBY ON RAILS FRONT-END *********************************************************************************
+
+var register_logged_in_reqs = new Hash( <%= AccountController::Reqs::REGISTER_INVITATION_LOGGED_IN.to_json %> );
+var register_login_reqs = new Hash( <%= AccountController::Reqs::REGISTER_INVITATION_LOGIN.to_json %> );
+var register_signup_reqs = new Hash( <%= AccountController::Reqs::REGISTER_INVITATION_SIGNUP.to_json %> );
+            
+var register_form = new Form( $('#register_form'), { 
+   'reqs' : ( current_user_email ? register_logged_in_reqs : register_login_reqs ),
+   'submit_type' : 'ajax',
+   'submitting_text' : 'Saving...',
+   'ajax' : { 
+      'url' : '/account/register_invitation',
+      'success_hook' : success_fn
+   }
+});
+
+function Form( form, config ) {
+   var self = this;
+   this.form = form;
+   this.config = config;
+   this.submit_button = form.find( "input[name='form[submit]']" );
+
+   form.find( "input[type=text], input[type=password]" ).bind( 'keyup blur', function() { 
+      var name = $(this).attr( 'name' );
+      name = name.substring( 5, name.length-1 );
+      var error = Validate.field( form, name, config.reqs.get( name ) );
+      var field = form.find( '.' + name );
+      if ( error ) {
+         if ( field.find( 'input' ).hasClass( 'error' ) ) { 
+            field.find( '.error-message' ).text( error );
+         }
+      } else { 
+         field.find( '.error-message' ).text( '' );
+         field.find( "input" ).removeClass( 'error' );
+      }
+   });
+
+   this.draw_errors = function( errors ) {
+      var keys = errors.keys();
+      for ( var i = 0; i<keys.length; i++ ) { 
+         var name = keys[i];
+         var error = errors.get( name );
+         var field = form.find( '.' + name );
+         field.find( '.error-message' ).text( error );
+         field.find( "input" ).addClass( 'error' );
+      }
+   }
+
+   this.submit_button.click( function() { 
+      var errors = Validate.form( form, config.reqs );
+      if ( errors ) { 
+         self.draw_errors( errors ); 
+         return false;
+      } else { 
+         var button_text = self.submit_button.val();
+         self.submit_button.val( self.config.submitting_text );
+         self.submit_button.attr( { disabled: true } ).addClass( 'disabled' );      
+         if ( self.config.submit_type=='ajax' ) { 
+            $.ajax( {
+               url: self.config.ajax.url,
+               type: 'POST',
+               data: form.serialize(),
+               success: function( data ) { 
+                  if ( data.response_code==0 ) { 
+                     self.draw_errors( new Hash( data.errors ) );
+                     self.submit_button.attr( { disabled: false } ).removeClass( 'disabled' ).val( button_text ); 
+                  } else { 
+                     self.config.ajax.success_hook( data ); 
+                  }
+               }
+            });
+            return false;
+         }
+      }
+      return true;
+   });
+};
+
 Copyright (c) 2010 Peder Linder. See LICENSE for details.
+
