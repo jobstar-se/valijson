@@ -1,0 +1,181 @@
+
+
+
+EXAMPLE USAGE
+
+class AccountController < ApplicationController
+
+   class Reqs
+      PASSWORD_RE = /^[a-z0-9\!@#\$%^&*_+.]+$/i
+      INVITATION_NAME_RE = /^[a-z0-9ÅÄÖåäö&_ ]+$/i
+
+      REQ_NAME = ['string', 'req', ['min',4], ['max',150], ['match', INVITATION_NAME_RE]]
+      REQ_PASSWORD = ['string', 'req', ['min', 5], ['max', 64], ['match', PASSWORD_RE] ]
+      REQ_EMAIL = ['email', 'req']
+
+      REGISTER_INVITATION_LOGGED_IN = {
+         'name' => REQ_NAME ,
+      }
+      REGISTER_INVITATION_SIGNUP = {
+         'name' => REQ_NAME,
+         'email' => REQ_EMAIL,
+         'password' => REQ_PASSWORD,
+      }
+      REGISTER_INVITATION_LOGIN = {
+         'name' => REQ_NAME,
+         'email' => REQ_EMAIL,
+         'password' => REQ_PASSWORD,
+      }
+      LOGIN = {
+         'email' => REQ_EMAIL,
+         'password' => REQ_PASSWORD,
+      }
+      REGAIN_ACCESS = {
+         'email' => REQ_EMAIL
+      }
+      RESET_PASSWORD = {
+         'new_password' => REQ_PASSWORD
+      }
+   end
+
+   def reset_password
+      raise 'illegal' if !request.post?
+
+      h = params[:form]
+      err = Validate.form( h, Reqs::RESET_PASSWORD ) || {}
+      if err.blank?
+         user = User.find_by_email( h[:email] )
+         if ( !user ) 
+            err[:email] = :no_such_user
+         elsif ( user.password!=Digest::SHA2.hexdigest( user.salt + h[:password] ) and user.temporary_password!=h[:password] )
+            err[:password] = :incorrect 
+         end
+      end
+      if err.blank? 
+         user.set_password( h )
+      end
+      
+      render :json => ( err.blank? ? {
+            :response_code => 1
+         } : {
+            :response_code => 0,
+            :errors => err
+         } )
+   end
+
+   def regain_access
+      raise 'illegal' if !request.post?
+
+      h = params[:form]
+      err = Validate.form( h, Reqs::REGAIN_ACCESS ) || {}
+      if ( err.blank? )
+         user = User.find_by_email( h[:email] )
+         if ( !user )
+            err[:email] = :no_such_user
+         end
+         if err.blank? 
+            user.send_temporary_password 
+         end
+      end
+
+      render :json => ( err.blank? ? {
+            :response_code => 1
+         } : { 
+            :response_code => 0,
+            :erors => err
+         } )
+   end
+
+   def login
+      raise 'illegal' if !request.post?
+
+      h = params[:form]
+      err = Validate.form( h, Reqs::LOGIN ) || {}
+      if ( err.blank? ) 
+         user = User.find_by_email( h[:email] )
+         temporary = false
+         if ( !user )
+            err[:email] = :no_such_user
+         elsif ( user.password!=Digest::SHA2.hexdigest( user.salt + h[:password] ) )
+            if ( user.temporary_password==h[:password] )
+               temporary = true
+            else
+               err[:password] = :incorrect 
+            end
+         end
+
+         if err.blank?
+            session[:current_user_id] = user.id
+         end
+      end
+      
+      render :json => ( err.blank? ? { 
+            :response_code => 1, 
+            :current_user_email => user.email,
+            :temporary => ( temporary ? 1 : 0 )
+         } : { :response_code => 0, :errors => err } 
+      )
+
+   end
+
+   def logout
+      session[:current_user_id] = nil
+      redirect_to '/', :status => 302
+      return
+   end
+
+   def register_invitation
+      raise 'illegal' if !request.post?
+
+      h = params[:form]
+      if ( logged_in? ) 
+         reqs = Reqs::REGISTER_INVITATION_LOGGED_IN
+      else 
+         reqs = h[:login]=='1' ? Reqs::REGISTER_INVITATION_LOGIN : Reqs::REGISTER_INVITATION_SIGNUP
+      end
+      err = Validate.form( h, reqs ) 
+      account_created = false
+      if err.blank?
+         err = {}
+         h[:nameid] = h[:name].gsub( /[\s\/.?&]/, '_' ).mb_chars.downcase.to_s
+         err[:name] = :not_unique if Invitation.find_by_sid( h[:nameid] )
+         err[:name] = :not_unique if Invitation.find_by_nameid( h[:nameid] )
+         if ( logged_in? )
+            user = current_user
+         else
+            if ( h[:login]=='1' )
+               user = User.find_by_email( h[:email] )
+               err[:email] = :no_such_user if !user 
+               if ( user and user.password!=Digest::SHA2.hexdigest( user.salt + h[:password] ) )
+                  err[:password] = :incorrect 
+               end
+            else
+               err[:email] = :not_unique if User.find_by_email( h[:email] )
+               if err.blank? 
+                  user = User.create( h )
+                  account_created = true
+               end
+            end
+            session[:current_user_id] = user.id if err.blank?
+         end
+      end
+      if err.blank?
+         invitation = Invitation.find_by_sid( h[:sid] )
+         raise h.inspect if !invitation || invitation.name
+         user.user_x_invitations.create( :invitation_id => invitation.id )
+         invitation.update_attributes( :name => h[:name], :nameid => h[:nameid] )
+      end
+
+      render :json => ( err.blank? ? { 
+            :response_code => 1, 
+            :current_user_email => user.email, 
+            :invitation_name => invitation.name,
+            :account_created => account_created ? 1 : 0
+         } : { :response_code => 0, :errors => err } 
+      )
+   end
+end
+
+
+
+Copyright (c) 2010 Peder Linder. See LICENSE for details.
